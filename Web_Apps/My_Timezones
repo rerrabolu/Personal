@@ -110,7 +110,8 @@
       { city: 'Seattle', country: 'USA' },
       { city: 'Toronto', country: 'Canada' },
       { city: 'Seoul', country: 'South Korea' },
-      { city: 'Boblingen', country: 'Germany' }
+      { city: 'Boblingen', country: 'Germany' },
+      { city: 'Moscow', country: 'Russia' }
     ];
 
     const allCitiesGrid = document.getElementById('allCitiesGrid');
