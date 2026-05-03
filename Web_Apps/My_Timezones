@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Current Time Viewer</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --panel: #dcfce7;
+      --panel-border: #16a34a;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --error: #b91c1c;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 900px;
+      background: var(--card);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+    }
+
+    .header-card {
+      border: 2px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--panel);
+      text-align: center;
+      font-weight: 800;
+      font-size: 28px;
+      margin-bottom: 18px;
+    }
+
+    .city-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .city-card {
+      border: 2px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--panel);
+      font-weight: 700;
+    }
+
+    .city-card-title {
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    .city-card-time {
+      font-size: 30px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .city-card-date {
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.4;
+      font-weight: 700;
+    }
+
+    .error {
+      color: var(--error);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="header-card">Current Time Viewer</div>
+    <div id="allCitiesGrid" class="city-grid"></div>
+  </main>
+
+  <script>
+    /*
+      Seed the app here.
+
+      IMPORTANT ORDERING NOTE:
+      Cities are displayed in exactly the same order as this seedCities array.
+      The city at index 0 is displayed first. The city at the last index is displayed last.
+      When updating this list, place cities in the exact display order you want.
+
+      The app automatically looks up the time zone from the city and country
+      when the page loads. Therefore, you only update this seedCities array.
+    */
+    const seedCities = [
+      { city: 'Hyderabad', country: 'India' },
+      { city: 'Austin', country: 'USA' },
+      { city: 'Seattle', country: 'USA' },
+      { city: 'Toronto', country: 'Canada' },
+      { city: 'Seoul', country: 'South Korea' },
+      { city: 'Boblingen', country: 'Germany' }
+    ];
+
+    const allCitiesGrid = document.getElementById('allCitiesGrid');
+    let cityList = [];
+
+    function makeLabel(city, country) {
+      return `${city.trim()}, ${country.trim()}`;
+    }
+
+    function normalize(value) {
+      return value.trim().toLowerCase().replace(/\s+/g, ' ');
+    }
+
+    function countryMatches(apiCountry, seededCountry) {
+      const api = normalize(apiCountry || '');
+      const seeded = normalize(seededCountry || '');
+
+      const countryAliases = {
+        'usa': ['usa', 'us', 'united states', 'united states of america', 'america'],
+        'united states': ['usa', 'us', 'united states', 'united states of america', 'america'],
+        'south korea': ['south korea', 'korea', 'republic of korea'],
+        'korea': ['south korea', 'korea', 'republic of korea'],
+        'germany': ['germany', 'deutschland'],
+        'canada': ['canada'],
+        'india': ['india']
+      };
+
+      const seededNames = countryAliases[seeded] || [seeded];
+      return seededNames.includes(api);
+    }
+
+    async function lookupTimeZone(city, country) {
+      const url = new URL('https://geocoding-api.open-meteo.com/v1/search');
+      url.searchParams.set('name', city);
+      url.searchParams.set('count', '10');
+      url.searchParams.set('language', 'en');
+      url.searchParams.set('format', 'json');
+
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`Lookup failed for ${city}, ${country}`);
+      }
+
+      const data = await response.json();
+      const results = Array.isArray(data.results) ? data.results : [];
+
+      const exactCountryMatch = results.find((result) =>
+        normalize(result.name || '') === normalize(city) &&
+        countryMatches(result.country, country) &&
+        result.timezone
+      );
+
+      const countryMatch = results.find((result) =>
+        countryMatches(result.country, country) && result.timezone
+      );
+
+      const bestMatch = exactCountryMatch || countryMatch;
+
+      if (!bestMatch) {
+        throw new Error(`No matching city/country found for ${city}, ${country}`);
+      }
+
+      return bestMatch.timezone;
+    }
+
+    async function buildCityListFromSeeds() {
+      cityList = seedCities.map((entry) => ({
+        city: entry.city,
+        country: entry.country,
+        label: makeLabel(entry.city, entry.country),
+        timeZone: null,
+        error: null
+      }));
+
+      renderAllSeededCities();
+
+      await Promise.all(cityList.map(async (entry) => {
+        try {
+          entry.timeZone = await lookupTimeZone(entry.city, entry.country);
+          entry.error = null;
+        } catch (error) {
+          entry.timeZone = null;
+          entry.error = error.message;
+        }
+      }));
+
+      renderAllSeededCities();
+    }
+
+    function formatTime(now, timeZone) {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      }).format(now);
+    }
+
+    function formatDate(now, timeZone) {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      }).format(now);
+    }
+
+    function getCityTimeHtml(city, now) {
+      if (city.error) {
+        return {
+          time: '--:-- --',
+          date: `<span class="error">${city.error}</span>`
+        };
+      }
+
+      if (!city.timeZone) {
+        return {
+          time: '--:-- --',
+          date: 'Looking up time zone...'
+        };
+      }
+
+      try {
+        return {
+          time: formatTime(now, city.timeZone),
+          date: formatDate(now, city.timeZone)
+        };
+      } catch (error) {
+        return {
+          time: '--:-- --',
+          date: '<span class="error">Could not display time.</span>'
+        };
+      }
+    }
+
+    function renderAllSeededCities() {
+      const now = new Date();
+      allCitiesGrid.innerHTML = '';
+
+      cityList.forEach((city) => {
+        const timeInfo = getCityTimeHtml(city, now);
+        const card = document.createElement('article');
+        card.className = 'city-card';
+        card.innerHTML = `
+          <div class="city-card-title">${city.label}</div>
+          <div class="city-card-time">${timeInfo.time}</div>
+          <div class="city-card-date">${timeInfo.date}</div>
+        `;
+        allCitiesGrid.appendChild(card);
+      });
+    }
+
+    buildCityListFromSeeds();
+    setInterval(renderAllSeededCities, 60000);
+  </script>
+</body>
+</html>
